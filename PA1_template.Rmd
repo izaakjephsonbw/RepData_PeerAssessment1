@@ -5,21 +5,140 @@ output:
     keep_md: true
 ---
 
-
 ## Loading and preprocessing the data
 
+Firstly, the packages to be used in the analysis were imported.
+```{r importpackages}
+library(tidyverse)
+library(lubridate)
+```
+The data was loaded into R.
+```{r loaddata}
+activity <- read_csv("activity.csv")
+```
+The date and interval variables were formatted and combined into a single datetime variable.
+```{r processdata}
+activity <- activity %>% 
+        mutate(date = dmy(date))
 
+activity <- activity %>% 
+        mutate(time = (hm(gsub("(\\d{2}(?!\\d?$))", "\\1:",
+                           str_pad(activity$interval, width=4, side="left", pad="0"), perl=T))))
+
+activity <- activity %>% 
+        mutate(hour = hour(time))
+
+activity <- activity %>% 
+        mutate(minute = minute(time))
+
+activity <- activity %>% 
+        mutate(datetime = as.POSIXct(activity$date + activity$time))
+
+activity <- activity %>% 
+        mutate(time = hms::as_hms(activity$datetime))
+```
 
 ## What is mean total number of steps taken per day?
 
+The data were grouped by day and then summarised by step total. 
+```{r total}
+total_steps <- activity %>% group_by(date) %>% 
+        summarise(total = sum(steps, na.rm = TRUE))
+```
 
+A histogram was then plotted using ggplot.
+```{r histogram}
+ggplot(data = total_steps, mapping = aes(total)) + geom_histogram(bins = 9) + 
+        xlab("total steps") + ylab("frequency")
+```
+
+The mean and median total steps were calculated.
+```{r mean_median}
+mean <- formatC(mean(total_steps$total), format = "d")
+median <- formatC(median(total_steps$total), format = "d")
+```
+The mean number of total steps per day is `r mean` and the median number of total steps per day is `r median`
 
 ## What is the average daily activity pattern?
+The data were grouped by interval and then summarised ove all days by the average step count. 
+```{r pattern}
+average <- activity %>% group_by(hour,minute) %>% 
+        summarise(ave_steps = mean(steps, na.rm = TRUE)) %>%
+        mutate(time = hms::as_hms(ymd_hms("2012-10-01 00:00:00") + hours(hour) + minutes(minute)))
+```
+
+A time series plot was then plotted showing the average number of steps taken for each 5 minute interval, averaged over all days
+```{r timeseries}
+ggplot(data = average, mapping = aes(x = time, y = ave_steps, group = 1)) + geom_line() +
+        xlab("time") + ylab("average number of steps") + 
+        scale_x_time(limits = c(0,86400), breaks=seq(0,86400,14400))
+``` 
 
 
+```{r maxsteps}
+maxsteps <- max(average$ave_steps)
+maxint <- average$time[which(average$ave_steps == maxsteps)] %>% as.character()
+```
+
+The 5 minute interval, on average across all the days in the dataset, containing the maximum number of steps is that at `r maxint`.  
 
 ## Imputing missing values
 
+The number of missing values was evaluated.
+```{r countna}
+num_nas <- sum(is.na(activity$steps))
+```
+The total number of missing values in the dataset is `r num_nas`
 
+The missing values were then imputed by replacing missing values with the mean value for that 5 minute interval across all days.
+```{r impute}
+impute <- activity %>% mutate_at(1, ~replace(.,is.na(.), average$ave_steps))
+```
+The first few rows of the imputed data are shown above.
+
+
+The data were grouped by day and then summarised by step total. 
+```{r new_total}
+new_total_steps <- impute %>% group_by(date) %>% 
+        summarise(total = sum(steps, na.rm = TRUE))
+```
+
+A histogram was then plotted using ggplot.
+```{r new_histogram}
+ggplot(data = new_total_steps, mapping = aes(total)) + geom_histogram(bins = 9) + 
+        xlab("total steps") + ylab("frequency")
+```
+
+The mean and median total steps were calculated.
+```{r new_mean_median}
+new_mean <- formatC(mean(new_total_steps$total), format = "d")
+new_median <- formatC(median(new_total_steps$total), format = "d")
+```
+The mean number of total steps per day is `r new_mean` and the median number of total steps per day is `r new_median`
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+A new factor variable was created, which indicates which dates are weekends/weekdays.
+```{r weekday}
+weekday <- impute %>% 
+        mutate(day = case_when(weekdays(date) %in% c("Saturday","Sunday") ~ "Weekend",
+                                weekdays(date) %in% c("Monday","Tuesday","Wednesday","Thursday","Friday") ~"Weekday"))
+                
+```
+
+The data was summarised by average number of steps over all days.
+```{r pattern2}
+average2 <- weekday %>% group_by(day,hour,minute) %>% 
+        summarise(ave_steps = mean(steps, na.rm = TRUE)) %>%
+        mutate(time = hms::as_hms(ymd_hms("2012-10-01 00:00:00") + hours(hour) + minutes(minute)))
+```
+
+Time series plots of avergae number of steps for both weekdays and weekends were plotted.
+```{r timeseries2}
+ggplot(data = average2, mapping = aes(x = time, y = ave_steps, group = 1)) + facet_grid(rows = vars(day)) + 
+        geom_line() +
+        xlab("time") + ylab("average number of steps") + 
+        scale_x_time(limits = c(0,86400), breaks=seq(0,86400,14400))
+``` 
+
+From this plot, we can see that, on average, the person takes more steps between 6am and 8am on weekdays, and they are more active after 8pm at weekends. On weekdays there is a spike in activity around 9am on weekdays, after which activity is much lower. On weekends, the activity is more evenly spread throughout the day.
